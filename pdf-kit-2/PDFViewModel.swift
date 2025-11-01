@@ -15,6 +15,10 @@ class PDFViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var isAnnotating = false
     @Published var drawWithFinger = true
+    @Published var brushSettings = BrushSettings()
+    @Published var currentPageIndex: Int = 0
+    @Published var totalPages: Int = 0
+    @Published var showPencilKitToolPicker = false
     
     func loadPDF(from urlString: String) {
         guard let url = URL(string: urlString) else {
@@ -44,6 +48,8 @@ class PDFViewModel: ObservableObject {
                         // Use MyPDFDocument instead of PDFDocument
                         if let pdfDoc = MyPDFDocument(data: data) {
                             self?.pdfDocument = pdfDoc
+                            self?.totalPages = pdfDoc.pageCount
+                            self?.currentPageIndex = 0
                         } else {
                             self?.errorMessage = "Failed to create PDF document"
                         }
@@ -53,6 +59,8 @@ class PDFViewModel: ObservableObject {
             // For local file URLs
             if let pdfDoc = MyPDFDocument(url: url) {
                 pdfDocument = pdfDoc
+                totalPages = pdfDoc.pageCount
+                currentPageIndex = 0
                 isLoading = false
             } else {
                 errorMessage = "Failed to load PDF from local URL"
