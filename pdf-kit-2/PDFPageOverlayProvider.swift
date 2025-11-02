@@ -44,6 +44,7 @@ class PDFPageOverlayProvider: NSObject, PDFPageOverlayViewProvider {
     
     // MARK: - PDFPageOverlayViewProvider
     
+    
     @available(iOS 16.0, *)
     func pdfView(_ view: PDFView, overlayViewFor page: PDFPage) -> UIView? {
         // Reuse existing canvas or create new one
@@ -83,9 +84,14 @@ class PDFPageOverlayProvider: NSObject, PDFPageOverlayViewProvider {
         guard let canvas = overlayView as? PKCanvasView,
               let myPage = page as? MyPDFPage else { return }
         
-        // Save drawing to page
         myPage.drawing = canvas.drawing
         pageToViewMapping.removeValue(forKey: page)
+    }
+    
+    // Normalize drawing bounds to match page bounds (public for use during export)
+    func normalizeDrawing(_ drawing: PKDrawing, to page: PDFPage) -> PKDrawing {
+        // PDFKit positions the overlay canvas to match page bounds, so the drawing is already aligned
+        return drawing
     }
     
     func setAnnotationMode(_ enabled: Bool) {
@@ -244,7 +250,6 @@ class PDFPageOverlayProvider: NSObject, PDFPageOverlayViewProvider {
 
 extension PDFPageOverlayProvider: PKCanvasViewDelegate {
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
-        // Save drawing immediately when it changes
         for (page, canvas) in pageToViewMapping where canvas === canvasView {
             if let myPage = page as? MyPDFPage {
                 myPage.drawing = canvasView.drawing
@@ -252,7 +257,6 @@ extension PDFPageOverlayProvider: PKCanvasViewDelegate {
             break
         }
         
-        // Notify that drawing changed for undo/redo state update
         NotificationCenter.default.post(name: Notification.Name("PKCanvasViewDrawingDidChange"), object: canvasView)
     }
 }

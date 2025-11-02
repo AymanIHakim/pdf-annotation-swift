@@ -7,6 +7,14 @@
 #import <React/RCTUIManager.h>
 #import <React/RCTBridge.h>
 
+// Import frameworks required by Swift classes (must be before Swift header)
+#import <PDFKit/PDFKit.h>
+#import <PencilKit/PencilKit.h>
+
+// Import Expo module for Expo types used in Swift header
+#import <ExpoModulesCore-Swift.h>
+#import <Expo-Swift.h>
+
 // Import the Swift header to access Swift classes
 // IMPORTANT: When integrating into your Expo app, replace "YourAppName" with your actual Expo app name
 // The header name format is: "<YourAppName>-Swift.h" where hyphens may become underscores

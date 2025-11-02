@@ -92,13 +92,6 @@ class RNPDFAnnotatorView: UIView {
         toolbar?.onAnnotationToggle = { [weak self] isAnnotating in
             self?.isAnnotating = isAnnotating
         }
-        toolbar?.onToolSelected = { [weak self] tool in
-            self?.setTool(tool)
-        }
-        toolbar?.onPencilKitToggle = { [weak self] show in
-            guard #available(iOS 16.0, *) else { return }
-            self?.overlayProvider?.setToolPickerVisible(show)
-        }
         toolbar?.onUndo = { [weak self] in
             self?.performUndo()
         }
@@ -108,31 +101,6 @@ class RNPDFAnnotatorView: UIView {
         toolbar?.onFingerToggle = { [weak self] enabled in
             self?.drawWithFinger = enabled
         }
-        toolbar?.onColorChanged = { [weak self] color in
-            // Convert UIColor to hex string
-            var red: CGFloat = 0
-            var green: CGFloat = 0
-            var blue: CGFloat = 0
-            var alpha: CGFloat = 0
-            color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-            let hexString = String(format: "#%02X%02X%02X", Int(red * 255), Int(green * 255), Int(blue * 255))
-            self?.toolColor = hexString
-        }
-        toolbar?.onWidthChanged = { [weak self] width in
-            self?.toolWidth = NSNumber(value: Float(width))
-        }
-        toolbar?.onOpacityChanged = { [weak self] opacity in
-            self?.toolOpacity = NSNumber(value: Float(opacity))
-        }
-        toolbar?.onEraserTypeChanged = { [weak self] eraserType in
-            // Store and apply eraser type change
-            self?.currentEraserType = eraserType
-            self?.updateBrushSettings()
-        }
-        
-        // Initialize toolbar with default color and settings
-        let defaultColor = PDFPageOverlayProvider.colorFromString(toolColor ?? "#000000")
-        toolbar?.setBrushSettings(color: defaultColor, width: CGFloat(toolWidth?.floatValue ?? 3.0), opacity: CGFloat(toolOpacity?.floatValue ?? 1.0))
         toolbar?.setDrawWithFinger(drawWithFinger)
         
         addSubview(toolbar!)
@@ -141,9 +109,10 @@ class RNPDFAnnotatorView: UIView {
         pdfView = PDFView()
         pdfView.translatesAutoresizingMaskIntoConstraints = false
         pdfView.autoScales = true
-        pdfView.displayMode = .singlePage
+        pdfView.displayMode = .singlePageContinuous
         pdfView.displayDirection = .vertical
         pdfView.backgroundColor = .lightGray
+        pdfView.displayBox = .cropBox
         addSubview(pdfView)
         
         // Setup overlay provider (iOS 16+)
@@ -189,11 +158,6 @@ class RNPDFAnnotatorView: UIView {
         ])
         
         updateToolbarVisibility()
-    }
-    
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        // Update layout if needed
     }
     
     // MARK: - PDF Loading
@@ -257,6 +221,8 @@ class RNPDFAnnotatorView: UIView {
         overlayProvider?.setDrawingPolicy(drawWithFinger)
         overlayProvider?.setAnnotationMode(isAnnotating)
         pdfView.isInMarkupMode = isAnnotating
+        // Show PencilKit tool picker when annotating
+        overlayProvider?.setToolPickerVisible(isAnnotating)
         toolbar?.setAnnotating(isAnnotating)
         updateToolbarVisibility()
         updateUndoRedoState()
@@ -271,33 +237,6 @@ class RNPDFAnnotatorView: UIView {
         }
     }
     
-    private func setTool(_ tool: DrawingToolType) {
-        // Always allow tool selection - it can be set even if PDF isn't loaded yet
-        // This allows the UI to update immediately
-        
-        // Update tool type string
-        let toolString: String
-        switch tool {
-        case .pen: toolString = "pen"
-        case .pencil: toolString = "pencil"
-        case .highlighter: toolString = "highlighter"
-        case .eraser: toolString = "eraser"
-        case .none: toolString = "none"
-        }
-        
-        // Close PencilKit tool picker when selecting other tools
-        if tool != .none {
-            toolbar?.setPencilKitToolPickerVisible(false)
-            if #available(iOS 16.0, *) {
-                overlayProvider?.setToolPickerVisible(false)
-            }
-        }
-        
-        // Update toolType - this will trigger updateBrushSettings() via didSet
-        // Don't call toolbar?.setCurrentTool() here to avoid infinite loop since
-        // the toolbar already knows it's selected (it triggered this call)
-        toolType = toolString
-    }
     
     @objc private func pdfViewPageChanged(_ notification: Notification) {
         guard let document = pdfView.document else { return }
@@ -388,9 +327,6 @@ class RNPDFAnnotatorView: UIView {
             settings.eraserType = currentEraserType
         }
         
-        // Update toolbar with current color to keep it in sync
-        toolbar?.setBrushSettings(color: color, width: width, opacity: opacity)
-        
         // Safely set brush settings
         overlayProvider.setBrushSettings(settings)
     }
@@ -400,13 +336,37 @@ class RNPDFAnnotatorView: UIView {
     @objc func exportAnnotatedPDF() -> String? {
         guard let pdfDoc = pdfDocument else { return nil }
         
+        // Save any unsaved drawings from active canvas views
+        if #available(iOS 16.0, *), let overlayProvider = overlayProvider {
+            for (page, canvas) in overlayProvider.pageToViewMapping {
+                if let myPage = page as? MyPDFPage {
+                    myPage.drawing = canvas.drawing
+                }
+            }
+        }
+        
+        // Use the same display box that PDFView uses for display
+        let displayBox: PDFDisplayBox = .cropBox
+        
         // Add annotation for each page with drawing
         for i in 0..<pdfDoc.pageCount {
             guard let page = pdfDoc.page(at: i) as? MyPDFPage,
-                  let drawing = page.drawing else { continue }
+                let drawing = page.drawing,
+                !drawing.bounds.isEmpty else {
+                continue
+            }
             
+            // Remove existing annotation if any
+            if let existingAnnotation = page.annotations.first(where: { $0 is MyPDFAnnotation }) {
+                page.removeAnnotation(existingAnnotation)
+            }
+            
+            // Get the display bounds - this is where the overlay was positioned
+            let displayBounds = page.bounds(for: displayBox)
+            
+            // Create annotation with display bounds
             let annotation = MyPDFAnnotation(
-                bounds: page.bounds(for: .mediaBox),
+                bounds: displayBounds,
                 forType: .stamp,
                 withProperties: nil
             )
@@ -428,6 +388,7 @@ class RNPDFAnnotatorView: UIView {
             return nil
         }
     }
+
     
     // MARK: - Gesture Handlers
     
